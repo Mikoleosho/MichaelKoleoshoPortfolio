@@ -34,7 +34,7 @@ def make_client():
     client_id = os.environ.get("PLAID_CLIENT_ID")
     secret = os.environ.get("PLAID_SECRET")
     if not client_id or not secret:
-        sys.exit("Set PLAID_CLIENT_ID and PLAID_SECRET environment variables first.")
+        raise RuntimeError("Set PLAID_CLIENT_ID and PLAID_SECRET environment variables first.")
 
     config = plaid.Configuration(
         host=plaid.Environment.Sandbox,
@@ -43,9 +43,9 @@ def make_client():
     return plaid_api.PlaidApi(plaid.ApiClient(config))
 
 
-def get_access_token(client):
+def create_sandbox_public_token(client):
     # 1. Fake bank login (in production this public_token comes from Plaid Link).
-    public_token = client.sandbox_public_token_create(
+    return client.sandbox_public_token_create(
         SandboxPublicTokenCreateRequest(
             institution_id=SANDBOX_BANK,
             initial_products=[Products("transactions")],
@@ -56,6 +56,8 @@ def get_access_token(client):
         )
     ).public_token
 
+
+def exchange_public_token(client, public_token):
     # 2. Trade it for an access token. In production, this is the key to someone's
     #    bank data: store it encrypted on your server, never send it to the phone.
     return client.item_public_token_exchange(
@@ -93,7 +95,7 @@ def fetch_transactions(client, access_token, attempts=10, wait_seconds=3):
             return added
         print(f"No transactions yet (attempt {attempt}/{attempts}), waiting {wait_seconds}s...")
         time.sleep(wait_seconds)
-    sys.exit("Plaid never returned transactions. Try running the script again.")
+    raise RuntimeError("Plaid never returned transactions. Try again in a minute.")
 
 
 def simplify(t):
@@ -112,15 +114,20 @@ def simplify(t):
     }
 
 
-def main():
-    client = make_client()
-    access_token = get_access_token(client)
+def get_transactions(client, access_token):
+    # 4. Simplified, oldest first, skipping pending charges (they can still change or disappear).
     raw = fetch_transactions(client, access_token)
-
-    # 4. Save a simplified version, oldest first, skipping pending charges
-    #    (they can still change or disappear).
     txns = sorted((simplify(t) for t in raw), key=lambda t: t["date"])
-    txns = [t for t in txns if not t["pending"]]
+    return [t for t in txns if not t["pending"]]
+
+
+def main():
+    try:
+        client = make_client()
+        access_token = exchange_public_token(client, create_sandbox_public_token(client))
+        txns = get_transactions(client, access_token)
+    except RuntimeError as e:
+        sys.exit(str(e))
     with open(OUTPUT_FILE, "w") as f:
         json.dump(txns, f, indent=2)
     print(f"Saved {len(txns)} transactions to {OUTPUT_FILE} "

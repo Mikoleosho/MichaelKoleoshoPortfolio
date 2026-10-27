@@ -119,6 +119,8 @@ def analyze_merchant(merchant, txns, as_of):
 def detect(transactions, as_of=None):
     # Only money leaving the account (Plaid: positive amount = outflow).
     outflows = [t for t in transactions if t["amount"] > 0 and not t.get("pending")]
+    if not outflows:
+        return []
     if as_of is None:
         as_of = max(date.fromisoformat(t["date"]) for t in outflows)
 
@@ -131,6 +133,17 @@ def detect(transactions, as_of=None):
     return results
 
 
+def summarize(results):
+    active = [r for r in results if r["status"] == "active"]
+    monthly = round(sum(r["monthly_cost"] for r in active), 2)
+    return {
+        "monthly_total": monthly,
+        "yearly_total": round(monthly * 12, 2),
+        "active_count": len(active),
+        "price_increases": [r["display_name"] for r in active if r["price_increase"]],
+    }
+
+
 def print_report(results):
     print(f"{'Merchant':<22}{'Cadence':<11}{'Amount':>9}{'Per month':>11}  {'Last charge':<12}Status")
     print("-" * 78)
@@ -138,11 +151,10 @@ def print_report(results):
         flag = "  (price went up)" if r["price_increase"] else ""
         print(f"{r['display_name'][:21]:<22}{r['cadence']:<11}{r['latest_amount']:>9.2f}"
               f"{r['monthly_cost']:>11.2f}  {r['last_charge']:<12}{r['status']}{flag}")
-    active = [r for r in results if r["status"] == "active"]
-    total = sum(r["monthly_cost"] for r in active)
+    summary = summarize(results)
     print("-" * 78)
-    print(f"You're paying about ${total:,.2f}/month (${total * 12:,.0f}/year) "
-          f"across {len(active)} recurring charges.")
+    print(f"You're paying about ${summary['monthly_total']:,.2f}/month "
+          f"(${summary['yearly_total']:,.0f}/year) across {summary['active_count']} recurring charges.")
 
 
 def main():
