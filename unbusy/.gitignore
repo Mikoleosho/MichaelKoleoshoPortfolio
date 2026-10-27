@@ -3,3 +3,4 @@ transactions.json
 recurring.json
 sample_transactions.json
 __pycache__/
+.venv/
